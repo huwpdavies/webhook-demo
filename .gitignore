@@ -1,0 +1,9 @@
+# Virtual environment: rebuilt with `pip install flask requests`
+venv/
+
+# Python's compiled cache files
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store

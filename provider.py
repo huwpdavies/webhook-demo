@@ -18,13 +18,29 @@ payments = []
 poll_count = 0
 
 
+# Retry settings: up to 5 attempts, 3 seconds apart.
+MAX_ATTEMPTS = 5
+RETRY_DELAY = 3
+
+
 # Send one payment to the receiver as a POST request (this IS the webhook).
+# If the receiver doesn't answer with a success, wait and try again.
 def send_webhook(payment):
-    try:
-        requests.post(WEBHOOK_URL, json=payment, timeout=5)
-        print(f"WEBHOOK SENT {payment['id']}")
-    except requests.exceptions.RequestException:
-        print(f"WEBHOOK FAILED {payment['id']} (receiver not reachable)")
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            response = requests.post(WEBHOOK_URL, json=payment, timeout=5)
+            if response.ok:  # any 2xx status, such as 200, counts as delivered
+                print(f"WEBHOOK SENT {payment['id']} (attempt {attempt})")
+                return
+            print(f"attempt {attempt}/{MAX_ATTEMPTS} failed: status {response.status_code}")
+        except requests.exceptions.RequestException:
+            print(f"attempt {attempt}/{MAX_ATTEMPTS} failed: receiver not reachable")
+
+        # Wait before the next try (but not after the last one).
+        if attempt < MAX_ATTEMPTS:
+            time.sleep(RETRY_DELAY)
+
+    print(f"\033[1;31mWEBHOOK GAVE UP on {payment['id']} after {MAX_ATTEMPTS} attempts\033[0m")
 
 
 # POST /pay: create a new payment with a unique ID, an amount and a timestamp.
@@ -41,6 +57,17 @@ def pay():
     # Send the webhook in a background thread so /pay can return immediately.
     threading.Thread(target=send_webhook, args=(payment,)).start()
     return jsonify(payment)
+
+
+# POST /resend/pay_001: send the same webhook again, to simulate a duplicate delivery.
+@app.route("/resend/<payment_id>", methods=["POST"])
+def resend(payment_id):
+    for payment in payments:
+        if payment["id"] == payment_id:
+            print(f"RESENDING {payment_id}")
+            threading.Thread(target=send_webhook, args=(payment,)).start()
+            return jsonify(payment)
+    return jsonify({"error": "no such payment"}), 404
 
 
 # GET /payments?after=pay_002: return every payment newer than that ID.

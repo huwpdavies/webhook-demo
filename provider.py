@@ -1,16 +1,30 @@
 # provider.py: the pretend payment provider (like Stripe), on port 5050.
 import random
+import threading
 import time
 
+import requests
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+
+# Where the provider delivers webhooks: our receiver's URL.
+WEBHOOK_URL = "http://localhost:5001/webhook"
 
 # All payments live in a plain list (no database). Newest is last.
 payments = []
 
 # How many times someone has asked "anything new?" via /payments.
 poll_count = 0
+
+
+# Send one payment to the receiver as a POST request (this IS the webhook).
+def send_webhook(payment):
+    try:
+        requests.post(WEBHOOK_URL, json=payment, timeout=5)
+        print(f"WEBHOOK SENT {payment['id']}")
+    except requests.exceptions.RequestException:
+        print(f"WEBHOOK FAILED {payment['id']} (receiver not reachable)")
 
 
 # POST /pay: create a new payment with a unique ID, an amount and a timestamp.
@@ -23,6 +37,9 @@ def pay():
     }
     payments.append(payment)
     print(f"PAYMENT CREATED {payment['id']} (${payment['amount']})")
+
+    # Send the webhook in a background thread so /pay can return immediately.
+    threading.Thread(target=send_webhook, args=(payment,)).start()
     return jsonify(payment)
 
 
